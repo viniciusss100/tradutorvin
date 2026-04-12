@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f2040"/>
+      <stop offset="100%" stop-color="#1a3a6e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7ec8e3"/>
+      <stop offset="100%" stop-color="#4fa8c8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="256" height="256" rx="40" fill="url(#bg)"/>
+
+  <!-- Film strip left bar -->
+  <rect x="18" y="18" width="22" height="220" rx="6" fill="#0a1628"/>
+  <rect x="22" y="30"  width="14" height="18" rx="3" fill="#1e3a5f"/>
+  <rect x="22" y="62"  width="14" height="18" rx="3" fill="#1e3a5f"/>
+  <rect x="22" y="94"  width="14" height="18" rx="3" fill="#1e3a5f"/>
+  <rect x="22" y="126" width="14" height="18" rx="3" fill="#1e3a5f"/>
+  <rect x="22" y="158" width="14" height="18" rx="3" fill="#1e3a5f"/>
+  <rect x="22" y="190" width="14" height="18" rx="3" fill="#1e3a5f"/>
+
+  <!-- Film strip right bar -->
+  <rect x="216" y="18" width="22" height="220" rx="6" fill="#0a1628"/>
+  <rect x="220" y="30"  width="14" height="18" rx="3" fill="#1e3a5f"/>
+  <rect x="220" y="62"  width="14" height="18" rx="3" fill="#1e3a5f"/>
+  <rect x="220" y="94"  width="14" height="18" rx="3" fill="#1e3a5f"/>
+  <rect x="220" y="126" width="14" height="18" rx="3" fill="#1e3a5f"/>
+  <rect x="220" y="158" width="14" height="18" rx="3" fill="#1e3a5f"/>
+  <rect x="220" y="190" width="14" height="18" rx="3" fill="#1e3a5f"/>
+
+  <!-- Subtitle lines (3 lines suggesting text) -->
+  <rect x="52" y="158" width="100" height="10" rx="5" fill="url(#accent)" opacity="0.9"/>
+  <rect x="52" y="176" width="72"  height="10" rx="5" fill="url(#accent)" opacity="0.6"/>
+
+  <!-- Arrow down (translate direction) -->
+  <g transform="translate(168, 152)">
+    <rect x="11" y="0" width="10" height="22" rx="4" fill="#7ec8e3"/>
+    <polygon points="0,20 16,20 32,20 16,38" fill="#7ec8e3"/>
+  </g>
+
+  <!-- "A" letter (Auto) -->
+  <text x="128" y="130" font-family="'Segoe UI', Arial, sans-serif" font-size="88" font-weight="700"
+        text-anchor="middle" fill="url(#accent)" opacity="0.95">A</text>
+
+  <!-- Thin accent line bottom -->
+  <rect x="52" y="210" width="152" height="3" rx="2" fill="url(#accent)" opacity="0.4"/>
+</svg>

@@ -1,0 +1,15 @@
+{
+  "name": "stremio-translator-local",
+  "version": "3.0.0",
+  "description": "Tradutor de legendas usando Google Translate",
+  "main": "api/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node api/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2",
+    "@vitalets/google-translate-api": "*"
+  }
+}
