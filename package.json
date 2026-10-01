@@ -1,6 +1,6 @@
 {
   "name": "stremio-translator-local",
-  "version": "4.4.0",
+  "version": "4.4.1",
   "description": "Tradutor de legendas para pt-BR para o Stremio (Google Translate), com parser SRT/VTT/ASS, sincronização e cache",
   "main": "api/index.js",
   "type": "module",

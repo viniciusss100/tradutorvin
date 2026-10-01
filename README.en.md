@@ -9,7 +9,7 @@ Supports movies and series with IMDB (`tt*`) and Kitsu (`kitsu:*`, including ani
 ## Highlights
 
 - Fixed target: **Brazilian Portuguese (pt-BR)** — the only supported target (API and UI)
-- Stable translation engine chain with **automatic fallback**: `gemini` (optional, needs `GEMINI_API_KEY`) → `google-gtx` → `google-chrome` → `mymemory` (works on networks where the free Google endpoint returns 401/403/429)
+- Stable translation engine chain with **automatic fallback and circuit breaker**: `gemini` (optional, needs `GEMINI_API_KEY`) → `google-gtx` → `google-chrome` (works on networks where the free Google endpoint returns 401/403/429); both Google engines consistently produce Brazilian Portuguese. A `mymemory` engine exists but is NOT enabled by default because it often returns European Portuguese.
 - Optional Google Cloud Translation API key (used automatically when configured)
 - Robust SRT / VTT / ASS / SSA parser; always outputs safe SRT preserving original timestamps
 - Smart subtitle selection (avoids Forced/SDH/HI/OCR by default)

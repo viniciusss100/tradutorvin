@@ -10,7 +10,7 @@ Suporta filmes e séries com IDs IMDB (`tt*`) e Kitsu (`kitsu:*`, incluindo anim
 ## Funcionalidades
 
 - Tradução automática fixa para **Português (Brasil)** — único idioma de destino (na API e na UI)
-- **Cascata de engines com fallback automático**: `gemini` (opcional, se `GEMINI_API_KEY`) → `google-gtx` → `google-chrome` → `mymemory` (funciona em redes onde o Google livre retorna 401/403/429)
+- **Cascata de engines com fallback automático**: `gemini` (opcional, se `GEMINI_API_KEY`) → `google-gtx` → `google-chrome` (funciona em redes onde o Google livre retorna 401/403/429; todos produzem pt-BR de forma consistente)
 - **API Key oficial** do Google Cloud Translation opcional (usada automaticamente quando configurada)
 - Parser robusto para **SRT, VTT e ASS/SSA** (com conversão segura para SRT mantendo timestamps)
 - **Preservação exata dos timestamps** na tradução + normalização automática de eventos inválidos (o ajuste fino de offset é feito no player, não no addon)
@@ -100,19 +100,20 @@ npm run test:net   # inclui testes reais de tradução (requer rede)
 | `MAX_SUBTITLE_CHARS` | Máximo de caracteres processáveis | `500000` |
 | `MAX_SUBTITLE_OPTIONS` | Quantas legendas expor ao Stremio (1–5) | `3` |
 | `MAX_CUE_DURATION_MS` | Duração máxima por cue (normalização) | `12000` |
-| `TRANSLATION_ENGINES` | Ordem dos engines de tradução (vírgula) | `gemini,google-gtx,google-chrome,mymemory` (gemini só se houver chave) |
+| `TRANSLATION_ENGINES` | Ordem dos engines de tradução (vírgula) | `gemini,google-gtx,google-chrome` (gemini só se houver chave) |
 | `GEMINI_API_KEY` | Chave da API Gemini (Google AI Studio, tem nível gratuito) — ativa o engine `gemini` com prioridade | vazio |
 | `GEMINI_MODEL` | Modelo Gemini usado | `gemini-2.0-flash` |
 | `FALLBACK_TO_ORIGINAL` | `1` serve a legenda original se a tradução falhar | `1` |
 
 ### Engines de tradução (fallback automático)
 
-O destino é sempre **Português (Brasil)**. Cada lote tenta os engines na ordem configurada e, se todos falharem, o addon **isola o lote** (sub-lotes) para não perder o restante:
+O destino é sempre **Português (Brasil)**. Cada lote tenta os engines na ordem configurada (com **circuit breaker**: um engine que falha 2 vezes seguidas é ignorado no restante da tradução) e, se todos falharem, o addon **isola o lote** (sub-lotes) para não perder o restante:
 
 1. **`gemini`** *(opcional)* — Google Gemini via API gratuita (exige `GEMINI_API_KEY`). Prompt otimizado para pt-BR, preservando linhas, nomes próprios e efeitos sonoros.
 2. **`google-gtx`** — endpoint livre do Google (`translate_a/single?client=gtx`) com rotação de hosts `translate.googleapis.com`, `translate.google.com`, `translate.google.com.br`. O código `tl=pt` já gera português brasileiro ("ônibus", "sorvete").
 3. **`google-chrome`** — endpoint de tradução do Chrome (`translate_a/t?client=dict-chrome-ex`), funciona em redes onde o `gtx` é bloqueado (ex.: casos de HTTP 401/403/429).
-4. **`mymemory`** — [MyMemory](https://mymemory.translated.net) (gratuito, sem chave) usando o par `pt-BR` (o `pt` padrão dele é de Portugal e já foi corrigido), em blocos de até ~450 caracteres.
+
+Os dois engines do Google produzem pt-BR de forma consistente. O engine **`mymemory`** existe mas **não usamos por padrão**: o serviço retorna português de Portugal em boa parte das respostas (ignora o par `pt-BR`), o que violaria a regra de pt-BR. Para habilitá-lo (e assumir o risco de pt-PT): `TRANSLATION_ENGINES=google-gtx,google-chrome,mymemory`.
 
 Se uma chave oficial do Google for configurada, o engine `google-official` (Cloud Translation v2) tem prioridade. O engine realmente usado por lote aparece no log (`engines=...`).
 
@@ -141,8 +142,8 @@ Se uma chave oficial do Google for configurada, o engine `google-official` (Clou
   download seguro (timeout + cap de tamanho)
     → falhou? 502
   parse + normalizar
-  tradução (engines em cascata com fallback automático):
-    google-official (se apiKey) → gemini (se GEMINI_API_KEY) → google-gtx (3 hosts) → google-chrome → mymemory (pt-BR)
+  tradução (engines em cascata com fallback automático e circuit breaker):
+    google-official (se apiKey) → gemini (se GEMINI_API_KEY) → google-gtx (3 hosts) → google-chrome
     → todos falharam? sub-lotes isolando a causa
   lote com falha → mantém texto original só daquele trecho
   tradução parcial < 60% → serve legenda original (se FALLBACK_TO_ORIGINAL=1)

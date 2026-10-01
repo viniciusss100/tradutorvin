@@ -58,3 +58,26 @@ test("cascata: mymemory usado como último recurso com chunks < 500 chars", asyn
   assert.ok(results.every((r) => r.startsWith("[mm] ")));
   assert.ok(results.every((r) => r.length > 0));
 });
+
+test("circuit breaker: Google bloqueado não é tentado de novo em lotes seguintes", async () => {
+  process.env.TRANSLATION_ENGINES = "google-gtx,google-chrome";
+  let gtxCalls = 0;
+  __setFakeDownload(async (url) => {
+    if (url.includes("translate_a/single")) {
+      gtxCalls++;
+      throw new HttpError(401, "http 401", url);
+    }
+    if (url.includes("translate_a/t")) {
+      return Buffer.from(JSON.stringify(["tr-line"]));
+    }
+    throw new HttpError(404, "unexpected", url);
+  });
+
+  const units = [];
+  for (let i = 0; i < 1700; i++) units.push({ text: `line ${i}` });
+  const { stats } = await translateUnits(units, { from: "en", to: "pt" });
+  assert.ok(stats.batches >= 3, `batches=${stats.batches}`);
+  assert.equal(stats.failures, 0);
+  assert.equal(gtxCalls, 6, `gtx tentado ${gtxCalls} vez(es), esperado 6 (3 hosts no 1º e 2º lote, ignorado do 3º em diante; sem breaker seriam 9)`);
+  assert.ok(stats.enginesUsed.includes("google-chrome"));
+});

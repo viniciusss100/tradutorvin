@@ -285,7 +285,7 @@ app.get("/:userData/translate", async (req, res) => {
     return res.status(403).json({ error: "forbidden host" });
   }
 
-  const algorithmKey = sha1(`algo:${k || ""}|${url}|${enc || ""}|${toGoogleLang(from) || "auto"}|${targetLang}|3`);
+  const algorithmKey = sha1(`algo:${k || ""}|${url}|${enc || ""}|${toGoogleLang(from) || "auto"}|${targetLang}|4`);
   const cacheKey = "tr:" + algorithmKey;
   const hit = cacheGet(cacheKey);
   if (hit) {
