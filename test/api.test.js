@@ -76,7 +76,7 @@ test("subtitles para filme válida (ignora SDH e já-traduzidas)", async () => {
   const j = await r.json();
   assert.ok(j.subtitles.length >= 1);
   const first = j.subtitles[0];
-  assert.equal(first.lang, "por");
+  assert.equal(first.lang, "pt-BR");
   assert.ok(first.label);
   assert.match(first.url, /translate\?/);
   assert.ok(!/\.sdh\.srt/.test(first.url), "não deve escolher SDH primeiro");
@@ -87,7 +87,7 @@ test("subtitles para série german/fre mapeados corretamente (código B)", async
   const r = await fetch(`${base}/${ud}/subtitles/series/tt0903747:1:1.json`);
   const j = await r.json();
   assert.ok(j.subtitles.length >= 1);
-  for (const s of j.subtitles) assert.equal(s.lang, "por");
+  for (const s of j.subtitles) assert.equal(s.lang, "pt-BR");
 });
 
 test("subtitles para conteúdo inexistente devolve lista vazia", async () => {

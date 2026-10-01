@@ -6,7 +6,7 @@ import * as provider from "../lib/provider.js";
 import { translateSubtitleUrl } from "../lib/pipeline.js";
 import { fetchBuffer, validateSubtitleUrl, retry } from "../lib/http.js";
 import { cacheGet, cacheSet, sha1 } from "../lib/cache.js";
-import { toBcp47, toGoogleLang, isSameLanguage } from "../lib/language.js";
+import { toGoogleLang, isSameLanguage } from "../lib/language.js";
 import { pickBest, formatHint } from "../lib/selector.js";
 import { toSrt } from "../lib/serializer.js";
 import { parseSubtitles } from "../lib/parser.js";
@@ -23,6 +23,7 @@ const DST_LANG_OPTIONS = [{ code: "pt", label: "Português (Brasil)" }];
 
 const DST_LANG_LABELS = { pt: "Português (Brasil)" };
 const TARGET_LANG = "pt";
+const TARGET_LANG_CODE = "pt-BR";
 
 const BASE_MANIFEST = {
   id: "community.subtrans.autotranslate",
@@ -258,7 +259,7 @@ app.get("/:userData/subtitles/:type/*", async (req, res) => {
     return {
       id: `${sub.id}-tr-${i}`,
       url: href,
-      lang: toBcp47(targetLang),
+      lang: TARGET_LANG_CODE,
       label: `[${DST_LANG_LABELS[targetLang]}] traduzido de ${sub.lang.toUpperCase()}${formatHint(sub) ? " • " + formatHint(sub) : ""}`,
       title: `Traduzido de ${sub.lang.toUpperCase()}`,
     };
