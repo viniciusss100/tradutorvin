@@ -53,20 +53,12 @@
   <h2 class="i18n" data-pt="⚙️ Configurar Addon" data-en="⚙️ Configure Addon"></h2>
 
   <label class="i18n" data-pt="Idioma de destino" data-en="Target language"></label>
-  <select id="targetLang">
-    <option value="pt">🇧🇷 Português (BR)</option>
-    <option value="es">🇪🇸 Espanhol / Spanish</option>
-    <option value="fr">🇫🇷 Francês / French</option>
-    <option value="de">🇩🇪 Alemão / German</option>
-    <option value="it">🇮🇹 Italiano / Italian</option>
-    <option value="pl">🇵🇱 Polonês / Polish</option>
-    <option value="tr">🇹🇷 Turco / Turkish</option>
-    <option value="ru">🇷🇺 Russo / Russian</option>
-    <option value="ar">🇸🇦 Árabe / Arabic</option>
-    <option value="zh">🇨🇳 Chinês / Chinese</option>
-    <option value="ko">🇰🇷 Coreano / Korean</option>
-    <option value="hi">🇮🇳 Hindi</option>
+  <select id="targetLang" disabled>
+    <option value="pt">🇧🇷 Português (Brasil)</option>
   </select>
+  <small class="i18n"
+    data-pt="Tradução fixa para Português (Brasil)."
+    data-en="Always translated to Brazilian Portuguese."></small>
 
   <label class="i18n" data-pt="Idioma de origem preferido" data-en="Preferred source language"></label>
   <select id="srcLang">
@@ -79,21 +71,13 @@
     <option value="ita">Italiano / Italian</option>
   </select>
 
-  <label class="i18n" data-pt="Ajuste de sincronização (ms)" data-en="Sync offset (ms)"></label>
-  <input id="delayMs" type="number" class="i18n-placeholder"
-    data-pt="Ex.: 1500 adianta, -1000 atrasa (opcional)"
-    data-en="e.g. 1500 to advance, -1000 to delay (optional)">
-  <small class="i18n"
-    data-pt="Corrige legendas dessincronizadas na tradução."
-    data-en="Fixes desynced subtitles in the translation."></small>
-
-  <label class="i18n" data-pt="Google Translate API Key (opcional)" data-en="Google Translate API Key (optional)"></label>
+  <label class="i18n" data-pt="Google Cloud Translation API Key (opcional)" data-en="Google Cloud Translation API Key (optional)"></label>
   <input id="apiKey" type="password" class="i18n-placeholder"
-    data-pt="Deixe vazio para usar API gratuita"
-    data-en="Leave empty to use free API">
+    data-pt="Deixe vazio para usar API gratuita (ou configure GEMINI_API_KEY no servidor)"
+    data-en="Leave empty to use the free API (or set GEMINI_API_KEY on the server)">
   <small class="i18n"
-    data-pt="Sem chave funciona, mas pode ter limite de requisições."
-    data-en="Works without a key, but may hit rate limits."></small>
+    data-pt="Sem chave funciona, mas pode ter limite de requisições. O ajuste de legenda é feito no player, não no addon."
+    data-en="Works without a key, but may hit rate limits. Subtitle sync is handled by the player, not the addon."></small>
 
   <button class="btn-install" onclick="install()">
     <span class="i18n" data-pt="🚀 Instalar no Stremio" data-en="🚀 Install on Stremio"></span>
@@ -149,12 +133,10 @@
 
   function install() {
     const config = {
-      targetLang: document.getElementById('targetLang').value,
+      targetLang: 'pt',
       srcLang:    document.getElementById('srcLang').value,
-      delayMs:    document.getElementById('delayMs').value,
       apiKey:     document.getElementById('apiKey').value.trim(),
     };
-    if (config.delayMs === '' ) delete config.delayMs;
     const utf8 = new TextEncoder().encode(JSON.stringify(config));
     const b64 = btoa(String.fromCharCode(...utf8)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
     const manifest = `${location.origin}/${b64}/manifest.json`;

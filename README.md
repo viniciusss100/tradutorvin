@@ -9,18 +9,17 @@ Suporta filmes e séries com IDs IMDB (`tt*`) e Kitsu (`kitsu:*`, incluindo anim
 
 ## Funcionalidades
 
-- Tradução automática para pt-BR com engine próprio **`client=gtx`** (mais estável que a lib antiga, que era bloqueada com frequência)
-- **Cascata de engines com fallback automático**: `google-gtx` → `google-chrome` → `mymemory` (funciona em redes onde o Google livre retorna 401/403/429)
+- Tradução automática fixa para **Português (Brasil)** — único idioma de destino (na API e na UI)
+- **Cascata de engines com fallback automático**: `gemini` (opcional, se `GEMINI_API_KEY`) → `google-gtx` → `google-chrome` → `mymemory` (funciona em redes onde o Google livre retorna 401/403/429)
 - **API Key oficial** do Google Cloud Translation opcional (usada automaticamente quando configurada)
 - Parser robusto para **SRT, VTT e ASS/SSA** (com conversão segura para SRT mantendo timestamps)
-- **Preservação exata dos timestamps** na tradução + normalização automática de eventos inválidos
-- **Ajuste manual de sincronização** (offset em ms) configurável pelo usuário
+- **Preservação exata dos timestamps** na tradução + normalização automática de eventos inválidos (o ajuste fino de offset é feito no player, não no addon)
 - **Seleção inteligente da melhor legenda** (evita Forced/SDH/Hearing Impaired/OCR ruins por padrão)
 - **Falha de um lote não derruba a legenda** (retry + backoff + isolamento por sub-lotes)
 - **Cache em memória** (TTL) com chave por conteúdo + legenda + idiomas + versão
 - **Timeouts e retry com backoff** em todas as chamadas externas
 - **Fallback**: se a tradução falha parcialmente, serve a legenda original em vez de erro
-- **Observabilidade**: logs estruturados sem segredos (API keys mascaradas/ocultadas)
+- **Observabilidade**: logs estruturados sem segredos (API keys mascaradas/ocultadas) + engine usado por lote
 - Resolução Kitsu → IMDB (AniList + Cinemeta) com detecção de temporada
 - UI de configuração bilíngue (PT/EN) com geração de link base64url (sem `/` na URL)
 
@@ -101,18 +100,23 @@ npm run test:net   # inclui testes reais de tradução (requer rede)
 | `MAX_SUBTITLE_CHARS` | Máximo de caracteres processáveis | `500000` |
 | `MAX_SUBTITLE_OPTIONS` | Quantas legendas expor ao Stremio (1–5) | `3` |
 | `MAX_CUE_DURATION_MS` | Duração máxima por cue (normalização) | `12000` |
-| `TRANSLATION_ENGINES` | Ordem dos engines de tradução (vírgula) | `google-gtx,google-chrome,mymemory` |
+| `TRANSLATION_ENGINES` | Ordem dos engines de tradução (vírgula) | `gemini,google-gtx,google-chrome,mymemory` (gemini só se houver chave) |
+| `GEMINI_API_KEY` | Chave da API Gemini (Google AI Studio, tem nível gratuito) — ativa o engine `gemini` com prioridade | vazio |
+| `GEMINI_MODEL` | Modelo Gemini usado | `gemini-2.0-flash` |
 | `FALLBACK_TO_ORIGINAL` | `1` serve a legenda original se a tradução falhar | `1` |
 
 ### Engines de tradução (fallback automático)
 
-Cada lote tenta os engines na ordem configurada e, se todos falharem, o addon **isola o lote** (sub-lotes) para não perder o restante:
+O destino é sempre **Português (Brasil)**. Cada lote tenta os engines na ordem configurada e, se todos falharem, o addon **isola o lote** (sub-lotes) para não perder o restante:
 
-1. **`google-gtx`** — endpoint livre do Google (`translate_a/single?client=gtx`) com rotação de hosts `translate.googleapis.com`, `translate.google.com`, `translate.google.com.br`.
-2. **`google-chrome`** — endpoint de tradução do Chrome (`translate_a/t?client=dict-chrome-ex`), funciona em redes onde o `gtx` é bloqueado (ex.: casos de HTTP 401/403/429).
-3. **`mymemory`** — [MyMemory](https://mymemory.translated.net) (gratuito, sem chave), em blocos de até ~450 caracteres. Mais lento, usado como última linha.
+1. **`gemini`** *(opcional)* — Google Gemini via API gratuita (exige `GEMINI_API_KEY`). Prompt otimizado para pt-BR, preservando linhas, nomes próprios e efeitos sonoros.
+2. **`google-gtx`** — endpoint livre do Google (`translate_a/single?client=gtx`) com rotação de hosts `translate.googleapis.com`, `translate.google.com`, `translate.google.com.br`. O código `tl=pt` já gera português brasileiro ("ônibus", "sorvete").
+3. **`google-chrome`** — endpoint de tradução do Chrome (`translate_a/t?client=dict-chrome-ex`), funciona em redes onde o `gtx` é bloqueado (ex.: casos de HTTP 401/403/429).
+4. **`mymemory`** — [MyMemory](https://mymemory.translated.net) (gratuito, sem chave) usando o par `pt-BR` (o `pt` padrão dele é de Portugal e já foi corrigido), em blocos de até ~450 caracteres.
 
-Se uma chave oficial do Google estiver configurada, o engine `google-official` (Cloud Translation v2) tem prioridade. O engine realmente usado por lote aparece no log (`engines=...`).
+Se uma chave oficial do Google for configurada, o engine `google-official` (Cloud Translation v2) tem prioridade. O engine realmente usado por lote aparece no log (`engines=...`).
+
+> **Sobre "trocar o Google pelo Gemini":** não é viável trocar 100% sem chave — o caminho gratuito do Google Translate funciona sem cadastro, enquanto o Gemini exige uma chave (há nível gratuito no AI Studio). Por isso o Gemini entrou como **engine de prioridade quando a chave existir** (`GEMINI_API_KEY` no servidor), e não como substituição padrão.
 
 ### Tipos de erro de resposta do `/translate`
 
@@ -128,7 +132,7 @@ Se uma chave oficial do Google estiver configurada, o engine `google-official` (
 
 1. **Preservação direta (Nível 1):** timestamps da legenda original são mantidos byte a byte (ms).
 2. **Normalização (Nível 2):** corrige timestamps inválidos, overlap, duração negativa/fora do limite e ordem incorreta.
-3. **Alinhamento (Nível 3):** detecção global de offset por histograma de correspondência temporal/textual entre legendas do mesmo episódio (usado para evidência, sem correção automática agressiva). Ajuste manual disponível no config (`delayMs`, ex. `1500` adianta; `-1000` atrasa).
+3. **Ajuste no player (Nível 3):** o offset fino da legenda é feito pelo próprio player do Stremio (o addon não interfere nos timestamps).
 
 ## Fallback
 
@@ -138,7 +142,7 @@ Se uma chave oficial do Google estiver configurada, o engine `google-official` (
     → falhou? 502
   parse + normalizar
   tradução (engines em cascata com fallback automático):
-    google-official (se apiKey) → google-gtx (3 hosts) → google-chrome → mymemory
+    google-official (se apiKey) → gemini (se GEMINI_API_KEY) → google-gtx (3 hosts) → google-chrome → mymemory (pt-BR)
     → todos falharam? sub-lotes isolando a causa
   lote com falha → mantém texto original só daquele trecho
   tradução parcial < 60% → serve legenda original (se FALLBACK_TO_ORIGINAL=1)

@@ -8,16 +8,22 @@ Supports movies and series with IMDB (`tt*`) and Kitsu (`kitsu:*`, including ani
 
 ## Highlights
 
-- pt-BR translation with a stable engine chain and **automatic fallback**: `google-gtx` → `google-chrome` → `mymemory` (works on networks where the free Google endpoint returns 401/403/429)
+- Fixed target: **Brazilian Portuguese (pt-BR)** — the only supported target (API and UI)
+- Stable translation engine chain with **automatic fallback**: `gemini` (optional, needs `GEMINI_API_KEY`) → `google-gtx` → `google-chrome` → `mymemory` (works on networks where the free Google endpoint returns 401/403/429)
+- Optional Google Cloud Translation API key (used automatically when configured)
 - Robust SRT / VTT / ASS / SSA parser; always outputs safe SRT preserving original timestamps
 - Smart subtitle selection (avoids Forced/SDH/HI/OCR by default)
 - Batch translation with retry, backoff and per-batch isolation
 - In-memory TTL cache keyed by content + subtitle + languages + algorithm version
 - Timeouts and retries on every external call; anti-SSRF host allowlist
 - Fallback to the original subtitle when translation is only partially possible
-- Observability with secrets redacted from logs
+- Observability with secrets redacted from logs; engine used per batch is logged
 - Kitsu → IMDB resolution (AniList + Cinemeta) with season detection
 - Per-user config in a base64url URL (no database; no `/` in the path)
+
+## Gemini note
+
+Replacing Google entirely with Gemini is **not viable without a key**: the free Google endpoint needs no sign-up, while Gemini requires a key (there is a free tier on AI Studio). So Gemini is wired as a **priority engine when `GEMINI_API_KEY` is set on the server** (`GEMINI_MODEL` defaults to `gemini-2.0-flash`). Subtitle fine offset is handled by the Stremio player, not the addon.
 
 ## Architecture
 

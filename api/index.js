@@ -6,7 +6,7 @@ import * as provider from "../lib/provider.js";
 import { translateSubtitleUrl } from "../lib/pipeline.js";
 import { fetchBuffer, validateSubtitleUrl, retry } from "../lib/http.js";
 import { cacheGet, cacheSet, sha1 } from "../lib/cache.js";
-import { toBcp47, toGoogleLang, isSameLanguage, langLabel } from "../lib/language.js";
+import { toBcp47, toGoogleLang, isSameLanguage } from "../lib/language.js";
 import { pickBest, formatHint } from "../lib/selector.js";
 import { toSrt } from "../lib/serializer.js";
 import { parseSubtitles } from "../lib/parser.js";
@@ -19,40 +19,25 @@ const PORT = Number(process.env.PORT || 3000);
 
 const SRC_LANG_OPTIONS = ["any|Detectar idioma automaticamente, em qualquer idioma", "eng|Inglês", "jpn|Japonês", "spa|Espanhol", "fra|Francês", "deu|Alemão", "ita|Italiano"];
 
-const DST_LANG_OPTIONS = [
-  "pt|Português (Brasil)",
-  "es|Espanhol",
-  "fr|Francês",
-  "de|Alemão",
-  "it|Italiano",
-  "pl|Polonês",
-  "tr|Turco",
-  "ru|Russo",
-  "ar|Árabe",
-  "zh|Chinês (Simplificado)",
-  "ko|Coreano",
-  "hi|Hindi",
-  "ja|Japonês",
-  "nl|Holandês",
-];
+const DST_LANG_OPTIONS = [{ code: "pt", label: "Português (Brasil)" }];
 
-const DST_LANG_LABELS = Object.fromEntries(DST_LANG_OPTIONS.map((o) => o.split("|")));
+const DST_LANG_LABELS = { pt: "Português (Brasil)" };
+const TARGET_LANG = "pt";
 
 const BASE_MANIFEST = {
   id: "community.subtrans.autotranslate",
-  version: "4.3.0",
+  version: "4.4.0",
   name: "Auto Translate Subtitles",
-  description: "Traduz legendas automaticamente para pt-BR e outros idiomas via Google Translate, preservando timestamps e sincronização.",
+  description: "Traduz legendas automaticamente para Português (Brasil) via Google Translate / Gemini, preservando timestamps e sincronização.",
   logo: "/logo.svg",
   types: ["movie", "series"],
   catalogs: [],
   resources: [{ name: "subtitles", types: ["movie", "series"], idPrefixes: ["tt", "kitsu"] }],
   behaviorHints: { configurable: true, configurationRequired: true },
   config: [
-    { key: "targetLang", type: "select", title: "Idioma de destino", options: DST_LANG_OPTIONS.map((c) => `${c.split("|")[0]}|${c.split("|")[1]}`), default: "pt|Português (Brasil)", required: true },
+    { key: "targetLang", type: "select", title: "Idioma de destino", options: DST_LANG_OPTIONS.map((o) => `${o.code}|${o.label}`), default: "pt|Português (Brasil)", required: true },
     { key: "srcLang", type: "select", title: "Idioma de origem preferido", options: SRC_LANG_OPTIONS, default: "any|Detectar idioma automaticamente, em qualquer idioma" },
-    { key: "delayMs", type: "text", title: "Ajuste de sincronização (ms, opcional). Ex.: 1500 adianta, -1000 atrasa", required: false },
-    { key: "apiKey", type: "password", title: "Google Translate API Key (opcional — sem chave usa API gratuita com limite)", required: false },
+    { key: "apiKey", type: "password", title: "Google Cloud Translation API Key (opcional — sem chave usa API gratuita)", required: false },
   ],
 };
 
@@ -114,12 +99,11 @@ app.get("/manifest.json", (req, res) => {
 app.get("/:userData/manifest.json", (req, res) => {
   const base = getBaseUrl(req);
   const ud = parseUserData(req.params.userData);
-  const lang = (ud.targetLang || "pt").split("|")[0] || ud.targetLang || "pt";
   res.json({
     ...BASE_MANIFEST,
     logo: base + "/logo.svg",
     id: `community.subtrans.autotranslate.${req.params.userData.slice(0, 8)}`,
-    description: `Traduz legendas para ${DST_LANG_LABELS[lang] || lang} via Google Translate.`,
+    description: `Traduz legendas para ${DST_LANG_LABELS[TARGET_LANG]} via Google Translate / Gemini.`,
     behaviorHints: { configurable: true, configurationRequired: false },
   });
 });
@@ -229,9 +213,8 @@ const SUBTITLE_LIMIT = Math.min(5, Math.max(1, Number(process.env.MAX_SUBTITLE_O
 app.get("/:userData/subtitles/:type/*", async (req, res) => {
   const { userData, type } = req.params;
   const ud = parseUserData(userData);
-  const targetLang = (ud.targetLang || "pt").split("|")[0] || ud.targetLang || "pt";
+  const targetLang = TARGET_LANG;
   const srcPref = (ud.srcLang || "any").split("|")[0] || "any";
-  const manualOffset = Number(ud.delayMs) || 0;
 
   const raw = decodeURIComponent(req.params[0] || "");
   const id = raw.replace(/\.json$/, "").split("/")[0];
@@ -271,15 +254,12 @@ app.get("/:userData/subtitles/:type/*", async (req, res) => {
 
   const subtitles = chosen.map((sub, i) => {
     const params = new URLSearchParams({ url: sub.url, from: sub.lang2, to: targetLang, k: sub.id, enc: sub.encoding || "UTF-8" });
-    let href = `${getBaseUrl(req)}/${userData}/translate?${params}`;
-    if (manualOffset && manualOffset !== 0) {
-      href += `&d=${manualOffset}`;
-    }
+    const href = `${getBaseUrl(req)}/${userData}/translate?${params}`;
     return {
       id: `${sub.id}-tr-${i}`,
       url: href,
       lang: toBcp47(targetLang),
-      label: `[${DST_LANG_LABELS[targetLang] || langLabel(targetLang)}] traduzido de ${sub.lang.toUpperCase()}${formatHint(sub) ? " • " + formatHint(sub) : ""}`,
+      label: `[${DST_LANG_LABELS[targetLang]}] traduzido de ${sub.lang.toUpperCase()}${formatHint(sub) ? " • " + formatHint(sub) : ""}`,
       title: `Traduzido de ${sub.lang.toUpperCase()}`,
     };
   });
@@ -295,8 +275,7 @@ app.get("/:userData/translate", async (req, res) => {
   const enc = typeof req.query.enc === "string" ? req.query.enc : null;
   const ud = parseUserData(req.params.userData);
   const apiKey = ud.apiKey || null;
-  const manualOffset = Number(req.query.d || ud.delayMs || 0);
-  const targetLang = (to || ud.targetLang || "pt").split("|")[0] || "pt";
+  const targetLang = TARGET_LANG;
 
   if (!url) {
     return res.status(400).json({ error: "missing url" });
@@ -306,7 +285,7 @@ app.get("/:userData/translate", async (req, res) => {
     return res.status(403).json({ error: "forbidden host" });
   }
 
-  const algorithmKey = sha1(`algo:${k || ""}|${url}|${enc || ""}|${toGoogleLang(from) || "auto"}|${toGoogleLang(targetLang)}|${manualOffset}|3`);
+  const algorithmKey = sha1(`algo:${k || ""}|${url}|${enc || ""}|${toGoogleLang(from) || "auto"}|${targetLang}|3`);
   const cacheKey = "tr:" + algorithmKey;
   const hit = cacheGet(cacheKey);
   if (hit) {
@@ -330,7 +309,6 @@ app.get("/:userData/translate", async (req, res) => {
       from: toGoogleLang(fromLang),
       to: toGoogleLang(targetLang),
       apiKey,
-      offsetMs: manualOffset,
       encoding: enc,
       budgetMs: Number(process.env.TRANSLATE_BUDGET_MS || 9000),
     });
