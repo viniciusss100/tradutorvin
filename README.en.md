@@ -8,7 +8,7 @@ Supports movies and series with IMDB (`tt*`) and Kitsu (`kitsu:*`, including ani
 
 ## Highlights
 
-- pt-BR translation with a stable engine (the previous client was frequently rate-limited)
+- pt-BR translation with a stable engine chain and **automatic fallback**: `google-gtx` → `google-chrome` → `mymemory` (works on networks where the free Google endpoint returns 401/403/429)
 - Robust SRT / VTT / ASS / SSA parser; always outputs safe SRT preserving original timestamps
 - Smart subtitle selection (avoids Forced/SDH/HI/OCR by default)
 - Batch translation with retry, backoff and per-batch isolation

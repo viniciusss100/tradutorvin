@@ -40,7 +40,7 @@ const DST_LANG_LABELS = Object.fromEntries(DST_LANG_OPTIONS.map((o) => o.split("
 
 const BASE_MANIFEST = {
   id: "community.subtrans.autotranslate",
-  version: "4.2.0",
+  version: "4.3.0",
   name: "Auto Translate Subtitles",
   description: "Traduz legendas automaticamente para pt-BR e outros idiomas via Google Translate, preservando timestamps e sincronização.",
   logo: "/logo.svg",
@@ -306,7 +306,7 @@ app.get("/:userData/translate", async (req, res) => {
     return res.status(403).json({ error: "forbidden host" });
   }
 
-  const algorithmKey = sha1(`algo:${k || ""}|${url}|${enc || ""}|${toGoogleLang(from) || "auto"}|${toGoogleLang(targetLang)}|${manualOffset}|2`);
+  const algorithmKey = sha1(`algo:${k || ""}|${url}|${enc || ""}|${toGoogleLang(from) || "auto"}|${toGoogleLang(targetLang)}|${manualOffset}|3`);
   const cacheKey = "tr:" + algorithmKey;
   const hit = cacheGet(cacheKey);
   if (hit) {
@@ -357,7 +357,7 @@ app.get("/:userData/translate", async (req, res) => {
   }
 
   cacheSet(cacheKey, { srt: finalSrt, events, mode, partial: stats.partial });
-  info("cache SET", algorithmKey.slice(0, 12), "mode=", mode, "events=", events, "batches=", stats.batches, "ok=", stats.translatedUnits, "falhas=", stats.failures, "t=", stats.translationMs, "ms", "ratio=", stats.translatedRatio);
+  info("cache SET", algorithmKey.slice(0, 12), "mode=", mode, "events=", events, "batches=", stats.batches, "ok=", stats.translatedUnits, "falhas=", stats.failures, "t=", stats.translationMs, "ms", "ratio=", stats.translatedRatio, "engines=", (stats.enginesUsed || []).join(",") || "n/a");
   sendSrt(res, finalSrt, { mode, partial: stats.partial });
 });
 

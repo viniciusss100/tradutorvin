@@ -10,6 +10,7 @@ Suporta filmes e séries com IDs IMDB (`tt*`) e Kitsu (`kitsu:*`, incluindo anim
 ## Funcionalidades
 
 - Tradução automática para pt-BR com engine próprio **`client=gtx`** (mais estável que a lib antiga, que era bloqueada com frequência)
+- **Cascata de engines com fallback automático**: `google-gtx` → `google-chrome` → `mymemory` (funciona em redes onde o Google livre retorna 401/403/429)
 - **API Key oficial** do Google Cloud Translation opcional (usada automaticamente quando configurada)
 - Parser robusto para **SRT, VTT e ASS/SSA** (com conversão segura para SRT mantendo timestamps)
 - **Preservação exata dos timestamps** na tradução + normalização automática de eventos inválidos
@@ -100,7 +101,18 @@ npm run test:net   # inclui testes reais de tradução (requer rede)
 | `MAX_SUBTITLE_CHARS` | Máximo de caracteres processáveis | `500000` |
 | `MAX_SUBTITLE_OPTIONS` | Quantas legendas expor ao Stremio (1–5) | `3` |
 | `MAX_CUE_DURATION_MS` | Duração máxima por cue (normalização) | `12000` |
+| `TRANSLATION_ENGINES` | Ordem dos engines de tradução (vírgula) | `google-gtx,google-chrome,mymemory` |
 | `FALLBACK_TO_ORIGINAL` | `1` serve a legenda original se a tradução falhar | `1` |
+
+### Engines de tradução (fallback automático)
+
+Cada lote tenta os engines na ordem configurada e, se todos falharem, o addon **isola o lote** (sub-lotes) para não perder o restante:
+
+1. **`google-gtx`** — endpoint livre do Google (`translate_a/single?client=gtx`) com rotação de hosts `translate.googleapis.com`, `translate.google.com`, `translate.google.com.br`.
+2. **`google-chrome`** — endpoint de tradução do Chrome (`translate_a/t?client=dict-chrome-ex`), funciona em redes onde o `gtx` é bloqueado (ex.: casos de HTTP 401/403/429).
+3. **`mymemory`** — [MyMemory](https://mymemory.translated.net) (gratuito, sem chave), em blocos de até ~450 caracteres. Mais lento, usado como última linha.
+
+Se uma chave oficial do Google estiver configurada, o engine `google-official` (Cloud Translation v2) tem prioridade. O engine realmente usado por lote aparece no log (`engines=...`).
 
 ### Tipos de erro de resposta do `/translate`
 
@@ -125,9 +137,9 @@ npm run test:net   # inclui testes reais de tradução (requer rede)
   download seguro (timeout + cap de tamanho)
     → falhou? 502
   parse + normalizar
-  tradução gtx (host primário translate.googleapis.com)
-    → falhou? host secundário translate.google.com
-    → falhou? API oficial (se apiKey) → falhou? sub-lotes isolando a causa
+  tradução (engines em cascata com fallback automático):
+    google-official (se apiKey) → google-gtx (3 hosts) → google-chrome → mymemory
+    → todos falharam? sub-lotes isolando a causa
   lote com falha → mantém texto original só daquele trecho
   tradução parcial < 60% → serve legenda original (se FALLBACK_TO_ORIGINAL=1)
   erro final → 502 com JSON (nunca derruba o addon)
