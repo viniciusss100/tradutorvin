@@ -2,142 +2,86 @@
 
 > 🇧🇷 [Versão em Português](README.md)
 
-A Stremio addon that automatically translates subtitles to your chosen language using Google Translate.  
-Supports movies and series with IMDB (`tt*`) and Kitsu (`kitsu:*`) IDs, including anime.
+A Stremio addon that automatically **translates subtitles to Brazilian Portuguese (and other languages)** using a self-contained Google Translate engine (`client=gtx`; official Cloud Translation API when an API key is configured).
 
-## Features
+Supports movies and series with IMDB (`tt*`) and Kitsu (`kitsu:*`, including anime).
 
-- Automatic translation via Google Translate (free or with your own API Key)
-- 12 target languages: PT-BR, ES, FR, DE, IT, PL, TR, RU, AR, ZH, KO, HI
-- Preferred source language filter
-- Automatic Kitsu → IMDB resolution via AniList + Cinemeta (with season detection)
-- Bilingual configuration UI (PT/EN) with install link generator
-- Per-user configuration embedded in the URL — no database required
+## Highlights
 
----
+- pt-BR translation with a stable engine (the previous client was frequently rate-limited)
+- Robust SRT / VTT / ASS / SSA parser; always outputs safe SRT preserving original timestamps
+- Smart subtitle selection (avoids Forced/SDH/HI/OCR by default)
+- Batch translation with retry, backoff and per-batch isolation
+- In-memory TTL cache keyed by content + subtitle + languages + algorithm version
+- Timeouts and retries on every external call; anti-SSRF host allowlist
+- Fallback to the original subtitle when translation is only partially possible
+- Observability with secrets redacted from logs
+- Kitsu → IMDB resolution (AniList + Cinemeta) with season detection
+- Per-user config in a base64url URL (no database; no `/` in the path)
+
+## Architecture
+
+See [README.md](README.md) (PT) for the module map: `lib/` (`parser`, `serializer`, `translator`, `pipeline`, `provider`, `selector`, `syncer`, `language`, `http`, `cache`, `logger`) and `api/` (Express routes).
 
 ## Deploy
 
-### Option 1 — Vercel (recommended, free)
+### Vercel
+1. Import the repo on [Vercel](https://vercel.com) (`vercel.json` is auto-detected).
+2. No required env vars.
+3. Open `https://your-app.vercel.app/configure`.
 
-**1. Fork or clone the repository and push to GitHub**
+> ⚠️ Free plan caps each request at **10s**. The addon is optimized (large batches, time budget, cache, fallback), but very large subtitles may still exceed it. Use Docker for heavy use.
 
-**2. Import on Vercel**
-
-- Go to [vercel.com](https://vercel.com) → **Add New Project** → import the repository
-- No environment variables needed to get started
-- Vercel auto-detects `vercel.json` and deploys
-
-**3. Open the configuration page**
-
-```
-https://your-project.vercel.app/configure
-```
-
-> ⚠️ Vercel's free plan has a 10s request timeout. Long subtitles may time out.  
-> For heavy use, go with the Docker option.
-
----
-
-### Option 2 — Docker (self-hosted)
-
-**Requirements:** Docker, Docker Compose, public domain with HTTPS (e.g. Nginx Proxy Manager)
-
-**1. Clone the repository**
-
+### Docker (self-hosted)
 ```bash
-git clone <repo-url>
-cd tradutor
+git clone https://github.com/viniciusss100/tradutorvin.git
+cd tradutorvin
+docker compose up -d   # set PUBLIC_URL in compose.yml
 ```
+Point your HTTPS domain to `http://tradutor:3000`.
 
-**2. Edit `compose.yml`**
-
-```yaml
-environment:
-  - PUBLIC_URL=https://your-domain.com
-```
-
-**3. Start the container**
-
+### Local
 ```bash
-docker compose up -d
-```
-
-> `compose.yml` uses an external Docker network `npm-net` (Nginx Proxy Manager).  
-> Adjust the `networks` section if you use a different proxy.
-
-**4. Configure reverse proxy**
-
-Point `your-domain.com` → `http://tradutor:3000` with HTTPS.
-
-**5. Open**
-
-```
-https://your-domain.com/configure
-```
-
----
-
-### Local development
-
-```bash
-docker compose -f compose.local.yml up -d
-```
-
-Open: `http://localhost:3001/configure`
-
-Live logs:
-```bash
-docker logs -f tradutor
-```
-
----
-
-## Project structure
-
-```
-.
-├── api/
-│   ├── index.js               # Express server + main logic
-│   └── configure.html         # Configuration UI (PT/EN)
-├── lib/
-│   └── subtitleTranslator.js  # SRT parser + Google Translate
-├── vercel.json                # Vercel deploy config
-├── compose.yml                # Production Docker
-└── compose.local.yml          # Local development
+npm install
+npm start      # http://localhost:3000
+npm test       # unit/integration tests (offline)
+npm run test:net   # also runs real translation tests (network required)
 ```
 
 ## Environment variables
 
-| Variable | Description | Default |
-|---|---|---|
-| `PUBLIC_URL` | Public URL of the addon (no trailing slash) | auto-detected |
+All documented in [README.md](README.md). Most important: `PUBLIC_URL`, `TRANSLATE_BUDGET_MS`, `MAX_BATCH_CHARS`, `CACHE_TTL_MS`, `FALLBACK_TO_ORIGINAL`.
 
 ## Endpoints
 
 | Route | Description |
 |---|---|
 | `GET /manifest.json` | Base manifest |
-| `GET /configure` | Configuration page |
-| `GET /:userData/manifest.json` | Per-user manifest |
-| `GET /:userData/subtitles/:type/*` | Fetch subtitles |
-| `GET /:userData/translate` | Translate and serve SRT |
+| `GET /:userData/manifest.json` | Per-user manifest (base64url config) |
+| `GET /configure` | Configuration UI |
+| `GET /:userData/subtitles/:type/:id.json` | List translated subtitle options |
+| `GET /:userData/translate?url=...&from=...&to=...` | Download, translate, serve SRT |
 | `GET /health` | Health check |
 
-`userData` = user config JSON encoded as base64.
+## Synchronization
+1. Original timestamps are preserved exactly (ms-level).
+2. Automatic normalization of invalid timestamps, overlaps, negative durations, out-of-order cues.
+3. Global-offset detection (histogram) between same-episode subtitles for evidence; users can also set a manual `delayMs`.
 
-## Publish on stremio-addons.net
+## Audio / STT fallback
 
-Submit your public manifest URL:
-```
-https://your-domain.com/manifest.json
-```
+**Not implemented — documented technical limitation.** Subtitle addons do not receive the video/audio URL, and Vercel cannot run local Whisper inference. The repo (`Dockerfile`, `.gitignore` `models/`) is ready for a future self-hosted `faster-whisper` implementation if Stremio ever exposes media URLs to subtitle addons.
 
----
+## Limitations
+- Single subtitle source (OpenSubtitles via `strem.io`) without API keys.
+- Anime depends on Kitsu→IMDB resolution (AniList rarely exposes IMDb).
+- Google may translate proper nouns (e.g. "White" → "Branco").
+- Already-Brazilian-Portuguese subtitles are not shown (avoids pt→pt re-translation).
+- Extremely large subtitles may exceed the 10s Vercel limit.
 
-## ⚡ Supercharge your experience with a Debrid
+## Publish
+Submit `https://your-domain.com/manifest.json` to any addon catalog.
 
-For fast, buffer-free, high-quality streams on Stremio, use a debrid service:
-
-- **[TorBox](https://torbox.app/subscription?referral=b08bcd10-8df2-44c9-a0ba-4d5bdb62ef96)** — Fast, modern and great value
-- **[Real-Debrid](http://real-debrid.com/?id=6684575)** — The most popular and widely supported
+## ⚡ Supercharge with a Debrid
+- **[TorBox](https://torbox.app/subscription?referral=b08bcd10-8df2-44c9-a0ba-4d5bdb62ef96)**
+- **[Real-Debrid](http://real-debrid.com/?id=6684575)**

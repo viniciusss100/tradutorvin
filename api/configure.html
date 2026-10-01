@@ -71,13 +71,21 @@
   <label class="i18n" data-pt="Idioma de origem preferido" data-en="Preferred source language"></label>
   <select id="srcLang">
     <option value="any" class="i18n" data-pt="Qualquer (automático)" data-en="Any (automatic)">Qualquer (automático)</option>
-    <option value="en">Inglês / English</option>
-    <option value="ja">Japonês / Japanese</option>
-    <option value="es">Espanhol / Spanish</option>
-    <option value="fr">Francês / French</option>
-    <option value="de">Alemão / German</option>
-    <option value="it">Italiano / Italian</option>
+    <option value="eng">Inglês / English</option>
+    <option value="jpn">Japonês / Japanese</option>
+    <option value="spa">Espanhol / Spanish</option>
+    <option value="fra">Francês / French</option>
+    <option value="deu">Alemão / German</option>
+    <option value="ita">Italiano / Italian</option>
   </select>
+
+  <label class="i18n" data-pt="Ajuste de sincronização (ms)" data-en="Sync offset (ms)"></label>
+  <input id="delayMs" type="number" class="i18n-placeholder"
+    data-pt="Ex.: 1500 adianta, -1000 atrasa (opcional)"
+    data-en="e.g. 1500 to advance, -1000 to delay (optional)">
+  <small class="i18n"
+    data-pt="Corrige legendas dessincronizadas na tradução."
+    data-en="Fixes desynced subtitles in the translation."></small>
 
   <label class="i18n" data-pt="Google Translate API Key (opcional)" data-en="Google Translate API Key (optional)"></label>
   <input id="apiKey" type="password" class="i18n-placeholder"
@@ -143,9 +151,12 @@
     const config = {
       targetLang: document.getElementById('targetLang').value,
       srcLang:    document.getElementById('srcLang').value,
+      delayMs:    document.getElementById('delayMs').value,
       apiKey:     document.getElementById('apiKey').value.trim(),
     };
-    const b64      = btoa(unescape(encodeURIComponent(JSON.stringify(config))));
+    if (config.delayMs === '' ) delete config.delayMs;
+    const utf8 = new TextEncoder().encode(JSON.stringify(config));
+    const b64 = btoa(String.fromCharCode(...utf8)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
     const manifest = `${location.origin}/${b64}/manifest.json`;
     const stremio  = `stremio://${manifest.replace(/^https?:\/\//, '')}`;
     document.getElementById('manifest-url').textContent = manifest;

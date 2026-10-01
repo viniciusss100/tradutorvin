@@ -1,89 +1,81 @@
 import express from "express";
-import fetch from "node-fetch";
-import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import { translateSrt } from "../lib/subtitleTranslator.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import * as provider from "../lib/provider.js";
+import { translateSubtitleUrl } from "../lib/pipeline.js";
+import { fetchBuffer, validateSubtitleUrl, retry } from "../lib/http.js";
+import { cacheGet, cacheSet, sha1 } from "../lib/cache.js";
+import { toBcp47, toGoogleLang, isSameLanguage, langLabel } from "../lib/language.js";
+import { pickBest, formatHint } from "../lib/selector.js";
+import { toSrt } from "../lib/serializer.js";
+import { parseSubtitles } from "../lib/parser.js";
+import { normalizeCues } from "../lib/syncer.js";
+import { info, warn, error } from "../lib/logger.js";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
+const app = express();
+const PORT = Number(process.env.PORT || 3000);
 
-const app  = express();
-const PORT = 3000;
+const SRC_LANG_OPTIONS = ["any|Detectar idioma automaticamente, em qualquer idioma", "eng|Inglês", "jpn|Japonês", "spa|Espanhol", "fra|Francês", "deu|Alemão", "ita|Italiano"];
 
-// Idiomas de origem suportados (legenda original)
-const SRC_LANGS = { eng: "en", jpn: "ja", spa: "es", fra: "fr", deu: "de", ita: "it", por: "pt" };
-
-// Idiomas de destino disponíveis para o usuário escolher
 const DST_LANG_OPTIONS = [
-  "pt",   // Português (BR)
-  "es",   // Espanhol
-  "fr",   // Francês
-  "de",   // Alemão
-  "it",   // Italiano
-  "pl",   // Polonês
-  "tr",   // Turco
-  "ru",   // Russo
-  "ar",   // Árabe
-  "zh",   // Chinês (Simplificado)
-  "ko",   // Coreano
-  "hi",   // Hindi
+  "pt|Português (Brasil)",
+  "es|Espanhol",
+  "fr|Francês",
+  "de|Alemão",
+  "it|Italiano",
+  "pl|Polonês",
+  "tr|Turco",
+  "ru|Russo",
+  "ar|Árabe",
+  "zh|Chinês (Simplificado)",
+  "ko|Coreano",
+  "hi|Hindi",
+  "ja|Japonês",
+  "nl|Holandês",
 ];
 
-const DST_LANG_LABELS = {
-  pt: "Português (BR)", es: "Espanhol", fr: "Francês", de: "Alemão",
-  it: "Italiano", pl: "Polonês", tr: "Turco", ru: "Russo",
-  ar: "Árabe", zh: "Chinês", ko: "Coreano", hi: "Hindi",
-};
-
-// Código BCP-47 que o Stremio exibe na lista de legendas
-const DST_LANG_BCP = {
-  pt: "por", es: "spa", fr: "fra", de: "ger", it: "ita",
-  pl: "pol", tr: "tur", ru: "rus", ar: "ara", zh: "zho", ko: "kor", hi: "hin",
-};
+const DST_LANG_LABELS = Object.fromEntries(DST_LANG_OPTIONS.map((o) => o.split("|")));
 
 const BASE_MANIFEST = {
   id: "community.subtrans.autotranslate",
-  version: "4.1.0",
+  version: "4.2.0",
   name: "Auto Translate Subtitles",
-  description: "Traduz legendas automaticamente para o idioma escolhido via Google Translate.",
+  description: "Traduz legendas automaticamente para pt-BR e outros idiomas via Google Translate, preservando timestamps e sincronização.",
   logo: "/logo.svg",
   types: ["movie", "series"],
   catalogs: [],
-  resources: [
-    { name: "subtitles", types: ["movie", "series"], idPrefixes: ["tt", "kitsu"] }
-  ],
+  resources: [{ name: "subtitles", types: ["movie", "series"], idPrefixes: ["tt", "kitsu"] }],
   behaviorHints: { configurable: true, configurationRequired: true },
   config: [
-    {
-      key: "targetLang",
-      type: "select",
-      title: "Idioma de destino",
-      options: DST_LANG_OPTIONS.map(c => `${c}|${DST_LANG_LABELS[c]}`),
-      default: "pt|Português (BR)",
-      required: true,
-    },
-    {
-      key: "srcLang",
-      type: "select",
-      title: "Idioma de origem preferido",
-      options: ["any|Qualquer (automático)", "en|Inglês", "ja|Japonês", "es|Espanhol", "fr|Francês", "de|Alemão", "it|Italiano"],
-      default: "any|Qualquer (automático)",
-    },
-    {
-      key: "apiKey",
-      type: "password",
-      title: "Google Translate API Key (opcional — sem chave usa API gratuita com limite)",
-      required: false,
-    },
+    { key: "targetLang", type: "select", title: "Idioma de destino", options: DST_LANG_OPTIONS.map((c) => `${c.split("|")[0]}|${c.split("|")[1]}`), default: "pt|Português (Brasil)", required: true },
+    { key: "srcLang", type: "select", title: "Idioma de origem preferido", options: SRC_LANG_OPTIONS, default: "any|Detectar idioma automaticamente, em qualquer idioma" },
+    { key: "delayMs", type: "text", title: "Ajuste de sincronização (ms, opcional). Ex.: 1500 adianta, -1000 atrasa", required: false },
+    { key: "apiKey", type: "password", title: "Google Translate API Key (opcional — sem chave usa API gratuita com limite)", required: false },
   ],
 };
 
-// Decodifica userData base64 da URL
 function parseUserData(b64) {
+  if (!b64) return {};
   try {
-    const json = Buffer.from(b64, "base64").toString("utf8");
+    let json;
+    try {
+      json = Buffer.from(b64, "base64url").toString("utf8");
+    } catch {
+      json = Buffer.from(b64, "base64").toString("utf8");
+    }
+    if (!json.startsWith("{")) {
+      json = Buffer.from(b64, "base64").toString("utf8");
+    }
     return JSON.parse(json);
-  } catch { return {}; }
+  } catch {
+    return {};
+  }
+}
+
+function encodeUserData(obj) {
+  return Buffer.from(JSON.stringify(obj)).toString("base64url");
 }
 
 app.use((req, res, next) => {
@@ -93,13 +85,17 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use((req, res, next) => { console.log("REQ:", req.method, req.url); next(); });
+app.use((req, res, next) => {
+  const safeUrl = req.url.replace(/\/([A-Za-z0-9_-]{16,})\//, "/<ud>/");
+  info("REQ", req.method, safeUrl);
+  next();
+});
 
 app.get("/health", (_, res) => res.json({ ok: true }));
 
 app.get("/logo.svg", (_, res) => {
-  res.setHeader("Content-Type", "image/svg");
-  res.send(readFileSync(join(__dir, "logo.svg")));
+  res.setHeader("Content-Type", "image/svg+xml");
+  res.send(readFileSync(join(__dir, "../public", "logo.svg")));
 });
 
 app.get("/configure", (_, res) => {
@@ -111,43 +107,40 @@ function getBaseUrl(req) {
   return process.env.PUBLIC_URL || (req.protocol + "://" + req.get("host"));
 }
 
-// Manifest raiz — sem userData, mostra config obrigatória
 app.get("/manifest.json", (req, res) => {
   res.json({ ...BASE_MANIFEST, logo: getBaseUrl(req) + "/logo.svg" });
 });
 
-// Manifest com userData: /:userData/manifest.json
 app.get("/:userData/manifest.json", (req, res) => {
   const base = getBaseUrl(req);
   const ud = parseUserData(req.params.userData);
-  const lang = (ud.targetLang || "pt").split("|")[0];
-  const manifest = {
+  const lang = (ud.targetLang || "pt").split("|")[0] || ud.targetLang || "pt";
+  res.json({
     ...BASE_MANIFEST,
     logo: base + "/logo.svg",
     id: `community.subtrans.autotranslate.${req.params.userData.slice(0, 8)}`,
     description: `Traduz legendas para ${DST_LANG_LABELS[lang] || lang} via Google Translate.`,
     behaviorHints: { configurable: true, configurationRequired: false },
-  };
-  res.json(manifest);
+  });
 });
-
-// ── Resolução Kitsu → IMDB ──────────────────────────────────────────────────
 
 async function searchImdbByTitle(title) {
   try {
-    const ctrl = new AbortController();
-    setTimeout(() => ctrl.abort(), 5000);
     const r = await fetch(
       "https://v3-cinemeta.strem.io/catalog/series/top/search=" + encodeURIComponent(title) + ".json",
-      { signal: ctrl.signal }
+      { signal: AbortSignal.timeout(5000) }
     );
     if (!r.ok) return null;
-    const titleBase = title.toLowerCase().split(":")[0].trim();
-    const match = ((await r.json()).metas || []).find(m =>
-      m.name?.toLowerCase().includes(titleBase) && m.imdb_id
-    );
-    if (match) { console.log("[subtrans] Cinemeta:", match.name, "->", match.imdb_id); return match.imdb_id; }
-  } catch (err) { console.log("[subtrans] Cinemeta falhou:", err.message); }
+    const titleBase = title.toLowerCase().split(":")[0].trim().replace(/[()]/g, "");
+    const j = await r.json();
+    const match = (j.metas || []).find((m) => m.name?.toLowerCase().includes(titleBase) && m.imdb_id);
+    if (match) {
+      info("Cinemeta:", match.name, "->", match.imdb_id);
+      return match.imdb_id;
+    }
+  } catch (e) {
+    warn("Cinemeta falhou:", e.message);
+  }
   return null;
 }
 
@@ -159,151 +152,239 @@ async function walkToRoot(anilistId, depth = 0) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         query: `query($id:Int){Media(id:$id,type:ANIME){title{english romaji} format externalLinks{site url} relations{edges{relationType node{id format}}}}}`,
-        variables: { id: parseInt(anilistId) }
-      })
+        variables: { id: parseInt(anilistId) },
+      }),
+      signal: AbortSignal.timeout(5000),
     });
     if (!r.ok) return { rootId: anilistId, depth };
-    const media      = (await r.json()).data?.Media;
-    const imdbDirect = (media?.externalLinks || [])
-      .find(l => l.site === "IMDb" || l.url?.includes("imdb.com/title/"))
-      ?.url?.match(/tt\d+/)?.[0] || null;
-    const prequel = (media?.relations?.edges || []).find(e =>
-      e.relationType === "PREQUEL" && e.node.format !== "MOVIE"
-    );
+    const media = (await r.json()).data?.Media;
+    const imdbDirect = media?.externalLinks?.find((l) => l.site === "IMDb" || l.url?.includes("imdb.com/title/"))?.url?.match(/tt\d+/)?.[0] || null;
+    const prequel = media?.relations?.edges?.find((e) => e.relationType === "PREQUEL" && e.node.format !== "MOVIE");
     if (!prequel) return { rootId: anilistId, depth, title: media?.title, imdbDirect };
     return walkToRoot(prequel.node.id, depth + 1);
-  } catch { return { rootId: anilistId, depth }; }
+  } catch {
+    return { rootId: anilistId, depth };
+  }
 }
 
 async function resolveKitsuToImdb(kitsuId) {
+  const cacheKey = "kitsu:" + kitsuId;
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
   try {
-    const ctrl = new AbortController();
-    setTimeout(() => ctrl.abort(), 5000);
-    const rk = await fetch(
-      "https://kitsu.io/api/edge/anime/" + kitsuId + "/mappings",
-      { headers: { "Accept": "application/vnd.api+json" }, signal: ctrl.signal }
-    );
+    const rk = await fetch("https://kitsu.io/api/edge/anime/" + kitsuId + "/mappings", {
+      headers: { "Accept": "application/vnd.api+json" },
+      signal: AbortSignal.timeout(5000),
+    });
     if (!rk.ok) return null;
-    const alMap = ((await rk.json()).data || []).find(m => m.attributes?.externalSite === "anilist/anime");
+    const alMap = ((await rk.json()).data || []).find((m) => m.attributes?.externalSite === "anilist/anime");
     const anilistId = alMap?.attributes?.externalId;
     if (!anilistId) return null;
-    console.log("[subtrans] AniList ID:", anilistId);
-
+    info("AniList ID:", anilistId);
     const { depth, title, imdbDirect } = await walkToRoot(parseInt(anilistId));
     const season = depth + 1;
-    console.log("[subtrans] season:", season);
-
-    if (imdbDirect) return { imdbId: imdbDirect, season };
-
+    if (season > 1) info("Season detectada:", season);
+    if (imdbDirect) {
+      cacheSet(cacheKey, { imdbId: imdbDirect, season });
+      return { imdbId: imdbDirect, season };
+    }
     for (const t of [title?.english, title?.romaji].filter(Boolean)) {
       const imdbId = await searchImdbByTitle(t);
-      if (imdbId) return { imdbId, season };
+      if (imdbId) {
+        cacheSet(cacheKey, { imdbId, season });
+        return { imdbId, season };
+      }
     }
-  } catch (err) { console.log("[subtrans] Resolução falhou:", err.message); }
+  } catch (e) {
+    warn("Resolução Kitsu falhou:", e.message);
+  }
   return null;
 }
+
+function parseContentId(id, type) {
+  const tt = id.match(/tt\d+/);
+  const imdbId = tt ? tt[0] : null;
+  let season = null;
+  let episode = null;
+  let kitsuId = null;
+  if (type === "series") {
+    if (id.startsWith("kitsu:")) {
+      kitsuId = id.split(":")[1] || null;
+      episode = id.split(":")[2] || null;
+    } else {
+      const m = id.match(/:(\d+):(\d+)$/);
+      if (m) {
+        season = m[1];
+        episode = m[2];
+      }
+    }
+  }
+  return { imdbId, season, episode, kitsuId };
+}
+
+const SUBTITLE_LIMIT = Math.min(5, Math.max(1, Number(process.env.MAX_SUBTITLE_OPTIONS || 3)));
 
 // ── Subtitles ───────────────────────────────────────────────────────────────
 
 app.get("/:userData/subtitles/:type/*", async (req, res) => {
   const { userData, type } = req.params;
-  const ud         = parseUserData(userData);
-  const targetLang = (ud.targetLang || "pt").split("|")[0];
-  const srcPref    = (ud.srcLang   || "any").split("|")[0];
-  const apiKey     = ud.apiKey || null;
+  const ud = parseUserData(userData);
+  const targetLang = (ud.targetLang || "pt").split("|")[0] || ud.targetLang || "pt";
+  const srcPref = (ud.srcLang || "any").split("|")[0] || "any";
+  const manualOffset = Number(ud.delayMs) || 0;
 
   const raw = decodeURIComponent(req.params[0] || "");
-  const id  = raw.replace(/\.json$/, "").split("/")[0];
-  console.log("[subtrans] subtitles type=" + type + " id=" + id + " -> " + targetLang);
+  const id = raw.replace(/\.json$/, "").split("/")[0];
+  const { imdbId, season, episode, kitsuId } = parseContentId(id, type);
+  const contentKey = id;
+  info("subtitles type=", type, "content=", contentKey, "->", targetLang);
 
-  const baseUrl   = process.env.PUBLIC_URL || (req.protocol + "://" + req.get("host"));
-  const subtitles = [];
-
-  const ttMatch = id.match(/tt\d+/);
-  let imdbId = ttMatch ? ttMatch[0] : null;
-  let season = null, episode = null;
-
-  if (type === "series") {
-    if (id.startsWith("kitsu:")) {
-      episode = id.split(":")[2] || null;
-    } else {
-      const m = id.match(/:(\d+):(\d+)$/);
-      if (m) { season = m[1]; episode = m[2]; }
+  let usableImdb = imdbId;
+  let usableSeason = season;
+  if (!usableImdb && kitsuId) {
+    const resolved = await resolveKitsuToImdb(kitsuId);
+    if (resolved) {
+      usableImdb = resolved.imdbId;
+      usableSeason = String(resolved.season);
     }
   }
-
-  if (!imdbId && id.startsWith("kitsu:")) {
-    const resolved = await resolveKitsuToImdb(id.split(":")[1]);
-    if (resolved) { imdbId = resolved.imdbId; season = String(resolved.season); }
+  if (!usableImdb) {
+    info("sem imdb resolvível para", contentKey);
+    return res.json({ subtitles: [] });
   }
 
-  console.log("[subtrans] imdbId=" + imdbId + " season=" + season + " ep=" + episode);
+  const candidatesRaw = type === "series" && usableSeason && episode ? await provider.searchEpisode(usableImdb, usableSeason, episode) : await provider.searchMovie(usableImdb);
 
-  if (imdbId) {
-    try {
-      const apiUrl = (type === "series" && season && episode)
-        ? `https://opensubtitles-v3.strem.io/subtitles/series/${imdbId}:${season}:${episode}.json`
-        : `https://opensubtitles-v3.strem.io/subtitles/movie/${imdbId}.json`;
-      const ctrl = new AbortController();
-      const t    = setTimeout(() => ctrl.abort(), 8000);
-      const r    = await fetch(apiUrl, { signal: ctrl.signal });
-      clearTimeout(t);
-      if (r.ok) {
-        let candidates = ((await r.json()).subtitles || []).filter(s => SRC_LANGS[s.lang]);
-        // Filtra por idioma de origem preferido (se não "any")
-        if (srcPref !== "any") {
-          const pref = candidates.filter(s => SRC_LANGS[s.lang] === srcPref);
-          if (pref.length) candidates = pref;
-        }
-        // Não traduz se a legenda já está no idioma de destino
-        candidates = candidates.filter(s => SRC_LANGS[s.lang] !== targetLang);
+  let candidates = (candidatesRaw.subtitles || []).filter((s) => {
+    if (isSameLanguage(s.lang, targetLang)) return false;
+    if (srcPref !== "any" && !isSameLanguage(s.lang, srcPref)) return false;
+    return true;
+  });
 
-        for (let i = 0; i < Math.min(2, candidates.length); i++) {
-          const sub  = candidates[i];
-          const from = SRC_LANGS[sub.lang];
-          const params = new URLSearchParams({ url: sub.url, from, to: targetLang });
-          if (apiKey) params.set("apiKey", apiKey);
-          subtitles.push({
-            id:    sub.id + "-trans-" + i,
-            url:   `${baseUrl}/${userData}/translate?${params}`,
-            lang:  DST_LANG_BCP[targetLang] || "por",
-            title: `[${DST_LANG_LABELS[targetLang] || targetLang}] traduzido de ${sub.lang.toUpperCase()}`,
-          });
-        }
-        console.log("[subtrans] Legendas montadas:", subtitles.length);
-      }
-    } catch (err) { console.error("[subtrans] Erro OS:", err.message); }
+  if (srcPref === "any" && candidates.length > 3) {
+    const eng = candidates.filter((s) => isSameLanguage(s.lang, "en"));
+    if (eng.length) candidates = eng;
   }
 
+  const ranked = pickBest(candidates, { targetLang });
+  const chosen = ranked.slice(0, SUBTITLE_LIMIT);
+
+  const subtitles = chosen.map((sub, i) => {
+    const params = new URLSearchParams({ url: sub.url, from: sub.lang2, to: targetLang, k: sub.id, enc: sub.encoding || "UTF-8" });
+    let href = `${getBaseUrl(req)}/${userData}/translate?${params}`;
+    if (manualOffset && manualOffset !== 0) {
+      href += `&d=${manualOffset}`;
+    }
+    return {
+      id: `${sub.id}-tr-${i}`,
+      url: href,
+      lang: toBcp47(targetLang),
+      label: `[${DST_LANG_LABELS[targetLang] || langLabel(targetLang)}] traduzido de ${sub.lang.toUpperCase()}${formatHint(sub) ? " • " + formatHint(sub) : ""}`,
+      title: `Traduzido de ${sub.lang.toUpperCase()}`,
+    };
+  });
+
+  info("legendas montadas:", subtitles.length, "para", contentKey, "(", candidatesRaw.cacheAge, "s cache )");
   return res.json({ subtitles });
 });
 
 // ── Translate ───────────────────────────────────────────────────────────────
 
 app.get("/:userData/translate", async (req, res) => {
-  const { url, from, to, apiKey } = req.query;
-  if (!url) return res.status(400).send("Missing url");
-  try {
-    const srtResp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!srtResp.ok) throw new Error("Download falhou: " + srtResp.status);
-    const srtText = await srtResp.text();
-    console.log("[subtrans] Traduzindo", srtText.length, "chars", from, "->", to);
-    const result = await translateSrt(srtText, from || "en", to || "pt", apiKey || null);
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    return res.send(result);
-  } catch (err) {
-    console.error("[subtrans] Erro tradução:", err.message);
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    return res.send("1\n00:00:00,000 --> 00:00:05,000\n[Erro ao traduzir legenda]\n");
+  const { url, from, to, k } = req.query;
+  const enc = typeof req.query.enc === "string" ? req.query.enc : null;
+  const ud = parseUserData(req.params.userData);
+  const apiKey = ud.apiKey || null;
+  const manualOffset = Number(req.query.d || ud.delayMs || 0);
+  const targetLang = (to || ud.targetLang || "pt").split("|")[0] || "pt";
+
+  if (!url) {
+    return res.status(400).json({ error: "missing url" });
   }
+  if (!validateSubtitleUrl(url)) {
+    warn("URL de legenda recusada:", url);
+    return res.status(403).json({ error: "forbidden host" });
+  }
+
+  const algorithmKey = sha1(`algo:${k || ""}|${url}|${enc || ""}|${toGoogleLang(from) || "auto"}|${toGoogleLang(targetLang)}|${manualOffset}|2`);
+  const cacheKey = "tr:" + algorithmKey;
+  const hit = cacheGet(cacheKey);
+  if (hit) {
+    info("cache HIT", "translate", algorithmKey.slice(0, 12), "events=", hit.events);
+    sendSrt(res, hit.srt, { mode: hit.mode || "translated", partial: !!hit.partial, fromCache: true });
+    return;
+  }
+
+  let buf;
+  try {
+    buf = await retry(() => fetchBuffer(url, { timeoutMs: Number(process.env.SUBTITLE_DOWNLOAD_TIMEOUT_MS || 8000), headers: { "User-Agent": "Mozilla/5.0" } }), { retries: 1, baseDelay: 300, maxDelay: 1000 });
+  } catch (e) {
+    warn("download da legenda falhou:", e.status, e.message);
+    return res.status(502).json({ error: "download failed", cause: e.status });
+  }
+
+  const fromLang = (from || "auto").split("|")[0] || "auto";
+  let result;
+  try {
+    result = await translateSubtitleUrl(buf, {
+      from: toGoogleLang(fromLang),
+      to: toGoogleLang(targetLang),
+      apiKey,
+      offsetMs: manualOffset,
+      encoding: enc,
+      budgetMs: Number(process.env.TRANSLATE_BUDGET_MS || 9000),
+    });
+  } catch (e) {
+    error("tradução falhou:", e.message);
+    return res.status(502).json({ error: "translation failed" });
+  }
+
+  const { srt, events, stats } = result;
+  if (!srt || !events) {
+    warn("subtitle sem eventos", stats);
+    return res.status(422).json({ error: stats?.error || "no subtitle content" });
+  }
+
+  let finalSrt = srt;
+  let mode = "translated";
+  if (stats.partial && stats.translatedRatio < 0.6 && process.env.FALLBACK_TO_ORIGINAL !== "0") {
+    const original = decodeCuesToSrt(buf);
+    if (original) {
+      finalSrt = original;
+      mode = "original";
+      warn("tradução parcial abaixo do limite, servindo original", stats.translatedRatio);
+    }
+  }
+
+  cacheSet(cacheKey, { srt: finalSrt, events, mode, partial: stats.partial });
+  info("cache SET", algorithmKey.slice(0, 12), "mode=", mode, "events=", events, "batches=", stats.batches, "ok=", stats.translatedUnits, "falhas=", stats.failures, "t=", stats.translationMs, "ms", "ratio=", stats.translatedRatio);
+  sendSrt(res, finalSrt, { mode, partial: stats.partial });
 });
+
+function decodeCuesToSrt(buf) {
+  try {
+    const parsed = parseSubtitles(new TextDecoder("utf-8").decode(buf));
+    if (parsed.cues.length) return toSrt(normalizeCues(parsed.cues));
+    const reParsed = parseSubtitles(new TextDecoder("windows-1252").decode(buf));
+    return reParsed.cues.length ? toSrt(normalizeCues(reParsed.cues)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function sendSrt(res, srt, { mode = "translated", partial = false, fromCache = false } = {}) {
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.setHeader("X-Subtrans-Mode", mode);
+  if (partial) res.setHeader("X-Subtrans-Partial", "1");
+  if (fromCache) res.setHeader("X-Subtrans-Cache", "1");
+  res.send(srt);
+}
 
 app.use((req, res) => res.status(404).json({ error: "Not found" }));
 
-// Vercel exporta o app como serverless function; localmente sobe o servidor
 if (process.env.VERCEL !== "1") {
-  app.listen(PORT, () => console.log("Addon ativo na porta " + PORT));
+  app.listen(PORT, () => info("Addon ativo na porta", PORT));
 }
 
 export default app;

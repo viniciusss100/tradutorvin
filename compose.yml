@@ -1,0 +1,20 @@
+services:
+  tradutor:
+    build: .
+    image: tradutorvin:latest
+    container_name: tradutor
+    restart: unless-stopped
+    environment:
+      - PUBLIC_URL=https://seu-dominio.com
+      - TZ=America/Sao_Paulo
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+networks:
+  default:
+    name: npm-net
+    external: true
