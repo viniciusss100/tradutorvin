@@ -27,7 +27,7 @@ const TARGET_LANG_CODE = "pt-BR";
 
 const BASE_MANIFEST = {
   id: "community.subtrans.autotranslate",
-  version: "4.4.0",
+  version: "4.4.3",
   name: "Auto Translate Subtitles",
   description: "Traduz legendas automaticamente para Português (Brasil) via Google Translate / Gemini, preservando timestamps e sincronização.",
   logo: "/logo.svg",
@@ -286,7 +286,7 @@ app.get("/:userData/translate", async (req, res) => {
     return res.status(403).json({ error: "forbidden host" });
   }
 
-  const algorithmKey = sha1(`algo:${k || ""}|${url}|${enc || ""}|${toGoogleLang(from) || "auto"}|${targetLang}|4`);
+  const algorithmKey = sha1(`algo:${k || ""}|${url}|${enc || ""}|${toGoogleLang(from) || "auto"}|${targetLang}|5`);
   const cacheKey = "tr:" + algorithmKey;
   const hit = cacheGet(cacheKey);
   if (hit) {
